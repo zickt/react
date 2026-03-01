@@ -1,0 +1,49 @@
+name: Publish to npm
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write # Required for OIDC — this is how npm authenticates the publish
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest # Must be GitHub-hosted (not self-hosted)
+    environment: npm # Must match the environment configured on npmjs.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - run: npm install
+
+      - name: Build
+        run: npx rollup -c
+
+      # No NODE_AUTH_TOKEN needed — OIDC handles authentication
+      # Provenance is automatic when publishing via trusted publishing from a public repo
+      - name: Publish (Trusted Publishing)
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "@zickt/react@${VERSION}" version 2>/dev/null; then
+            echo "::notice::v${VERSION} already published to npm — skipping"
+          else
+            npm publish --access public
+          fi
+
+      - name: Verify published package
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+          sleep 10
+          mkdir /tmp/verify && cd /tmp/verify
+          npm init -y
+          npm install react react-dom @zickt/react@${VERSION}
+          echo 'import { ZicktMessenger } from "@zickt/react";' > test.ts
+          npx tsc --noEmit --moduleResolution bundler --jsx react-jsx test.ts
+          rm -rf /tmp/verify
